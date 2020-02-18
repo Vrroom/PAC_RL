@@ -2,6 +2,7 @@ import numpy as np
 from MDP import *
 from BellmanEquation import *
 from itertools import product
+from Util import *
 
 class DDV () :
     """
@@ -19,7 +20,7 @@ class DDV () :
     which are used by the sampling process.
     """
 
-    def __init__ (self, mdp, epsilon, delta) :
+    def __init__ (self, mdp, epsilon, delta, seed) :
         """
         Constructor.
 
@@ -31,6 +32,10 @@ class DDV () :
             PAC Accuracy parameter.
         delta : float
             PAC Confidence parameter.
+        seed : int
+            Seed for the random number
+            generator. To ensure 
+            reproducibility.
         """
         self.mdp = mdp
 
@@ -39,13 +44,12 @@ class DDV () :
 
         self.N = np.zeros(mdp.T.shape)
         self.Ntotal = np.zeros(mdp.R.shape)
+        self.PHat = np.ones(mdp.T.shape)
 
         self.QUpper = np.ones(mdp.R.shape) * mdp.Vmax
         self.QLower = np.zeros(mdp.R.shape)
 
         self.mu = np.zeros(mdp.S)
-
-        self.PHat = 0.5 * np.ones(mdp.T.shape)
 
         # Since rewards are deterministic
         # this variable helps us keep track
@@ -53,13 +57,31 @@ class DDV () :
         # a (s, a) pair.
         self.R = np.zeros(mdp.R.shape)
 
+        self.rng = np.random.RandomState(seed)
+
         # In a lot of cases, we have 
         # to solve the bellman equations
         # iteratively. This is the stopping
         # predicate.
         self.stop = lambda i, err : i > 100 or err < 0.01
+        self.argmax = lambda a : stochasticArgmax(self.rng, self.epsilon * 1e-2, a)
+        self.argmin = lambda a : stochasticArgmin(self.rng, self.epsilon * 1e-2, a)
 
+        self.uniformSample()
         self.ddvLoop()
+
+    def uniformSample (self) :
+        """
+        Uniformly sample all (s, a) once
+        to get an initial estimate of 
+        transition probabilities.
+        """
+        S = self.mdp.S
+        A = self.mdp.A
+
+        for s, a in product(range(S), range(A)):
+            s_, self.R[s, a] = self.mdp.step(s, a)
+            self.updateVisitCountAndPHat(s, a, s_)
 
     def ddvLoop (self) :
         """
@@ -88,16 +110,17 @@ class DDV () :
 
             for s in range(self.mdp.S) :
                 if exploredStates[s] :
-                    ddv[s] = np.array([self.computeDDV(s, a) for a in range(self.mdp.A)])
+                    self.ddv[s] = np.array([self.computeDDV(s, a, delta_) for a in range(self.mdp.A)])
             
-            s, a = np.unravel_index(ddv.argmax(), ddv.shape)
+            print(self.ddv)
+            s, a = np.unravel_index(self.argmax(self.ddv), self.ddv.shape)
             s_, self.R[s,a] = self.mdp.step(s, a)
 
             exploredStates[s_] = True
 
             self.updateVisitCountAndPHat(s, a, s_)
 
-    def computeDDV(self, s, a) :
+    def computeDDV(self, s, a, delta) :
         """
         The OOU heuristic is used to calculate
         an approximation of DDV. This is done
@@ -112,12 +135,14 @@ class DDV () :
             State.
         a : int
             Action.
+        delta : float
+            Confidence measure.
         """
         dQ = self.QUpper[s, a] - self.QLower[s, a]
         if self.Ntotal[s, a] == 0 : 
             dQ_ = self.mdp.gamma * self.mdp.Vmax
             ddQ = np.abs(dQ - dQ_)
-            return self.mu(s) * ddQ
+            return self.mu[s] * ddQ
         else :
             Pu = np.copy(self.PHat)
             Pl = np.copy(self.PHat)
@@ -135,7 +160,7 @@ class DDV () :
 
             dQ_ = QUpper_[s, a] - QLower_[s, a]
             ddQ = np.abs(dQ - dQ_)
-            return self.mu(s) * ddQ
+            return self.mu[s] * ddQ
 
     def tryExploring (self, s, a) :
         """
@@ -230,13 +255,16 @@ class DDV () :
 
         deltaOmega = self.confidenceRadius(s, a, delta) / 2
 
-        while deltaOmega > 0 : 
+        while abs(deltaOmega) > 1e-3 : 
             S_ = self.PHat[s, a] < 1
 
-            donor = np.argmin(V[Pt[s, a] > 0])
-            recipient = np.argmax(V[Pt[s, a] < 1 and S_])
+            donor = self.argmin(V[Pt[s, a] > 0])
+            recipient = self.argmax(V[Pt[s, a] < 1 * S_])
 
-            zeta = min(1 - Pt[s, a, donor], Pt[s, a, recipient], deltaOmega)
+            zeta = min(1 - Pt[s, a, recipient], Pt[s, a, donor], deltaOmega)
+            
+            if abs(zeta) < 1e-3:
+                break
 
             if not findUpper :
                 donor, recipient = recipient, donor
@@ -290,16 +318,19 @@ class DDV () :
 
         unvisitedSucc = self.N[s, a] == 0
 
-        while deltaOmega > 0 : 
+        while abs(deltaOmega) > 1e-3 : 
             S_ = self.PHat[s, a] < 1
 
             if M0 == 0 :
                 S_[unvisitedSucc] = False
 
-            donor = np.argmin(V[Pt[s, a] > 0])
-            recipient = np.argmax(V[Pt[s, a] < 1 and S_])
+            donor = self.argmin(V[Pt[s, a] > 0])
+            recipient = self.argmax(V[Pt[s, a] < 1 * S_])
 
-            zeta = min(1 - Pt[s, a, donor], Pt[s, a, recipient], deltaOmega)
+            zeta = min(1 - Pt[s, a, recipient], Pt[s, a, donor], deltaOmega)
+            
+            if abs(zeta) < 1e-3 :
+                break
 
             if not findUpper :
                 donor, recipient = recipient, donor

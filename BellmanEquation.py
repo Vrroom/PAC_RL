@@ -71,6 +71,6 @@ def occupancySolver (mdp, policy, P, stoppingCondition) :
         muOld = np.copy(mu)
         mu = Pstart + mdp.gamma * np.sum(P * mu, axis=1)
         iterCnt += 1
-        error = np.linalg.norm(mu - muold)
+        error = np.linalg.norm(mu - muOld)
     return mu
 

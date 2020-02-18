@@ -20,11 +20,11 @@ def MDPfromJson (filename) :
     T = np.array(dct['T'])
     gamma = float(dct['gamma'])
     R = np.array(dct['R'])
-    return MDP(s0, S, A, T, gamma, R)
+    return MDP(s0, S, A, T, gamma, R, 0)
 
 class MDP () :
 
-    def __init__ (self, s0, S, A, T, gamma, R) :
+    def __init__ (self, s0, S, A, T, gamma, R, seed) :
         """
         Constructor
         
@@ -47,6 +47,10 @@ class MDP () :
             An S by A matrix denoting the
             reward associated with picking
             a particular action from a state.
+        seed : int
+            Seed for the random number
+            generator. To ensure 
+            reproducibility.
         """
         self.s0 = s0
         self.S = S
@@ -66,7 +70,7 @@ class MDP () :
         self.Vmax = 1 / (1 - gamma)
 
         # Random number generator
-        self.rng = np.random.RandomState()
+        self.rng = np.random.RandomState(seed)
 
     def step(self, s, a) :
         """
