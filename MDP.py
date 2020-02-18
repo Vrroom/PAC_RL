@@ -14,13 +14,13 @@ def MDPfromJson (filename) :
     with open (filename, 'r') as fd :
         dct = json.loads(fd.read())
 
-    s0 = int(dct['S'])
+    s0 = int(dct['s0'])
     S = int(dct['S'])
     A = int(dct['A'])
     T = np.array(dct['T'])
     gamma = float(dct['gamma'])
     R = np.array(dct['R'])
-    return MDP(S, A, T, gamma, R)
+    return MDP(s0, S, A, T, gamma, R)
 
 class MDP () :
 

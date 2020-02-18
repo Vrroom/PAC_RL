@@ -1,7 +1,6 @@
 import numpy as np
 from MDP import *
 from BellmanEquation import *
-from functools import partial
 from itertools import product
 
 class DDV () :
@@ -34,22 +33,39 @@ class DDV () :
             PAC Confidence parameter.
         """
         self.mdp = mdp
+
+        self.epsilon = epsilon
+        self.delta = delta
+
         self.N = np.zeros(mdp.T.shape)
+        self.Ntotal = np.zeros(mdp.R.shape)
+
         self.QUpper = np.ones(mdp.R.shape) * mdp.Vmax
         self.QLower = np.zeros(mdp.R.shape)
+
+        self.mu = np.zeros(mdp.S)
+
+        self.PHat = 0.5 * np.ones(mdp.T.shape)
 
         # Since rewards are deterministic
         # this variable helps us keep track
         # of them once we have encountered
         # a (s, a) pair.
         self.R = np.zeros(mdp.R.shape)
+
+        # In a lot of cases, we have 
+        # to solve the bellman equations
+        # iteratively. This is the stopping
+        # predicate.
+        self.stop = lambda i, err : i > 100 or err < 0.01
+
         self.ddvLoop()
 
     def ddvLoop (self) :
         """
-        Apply the DDV algo.
-        TODO : There are a lot of moving 
-        parts. Need to sort this.
+        Main loop of the DDV algorithm with 
+        the OOU Heuristic to compute the 
+        occupancy measure.
         """
         m = self.numberOfSamples()
         delta_ = self.delta / (self.mdp.S * self.mdp.A * m)
@@ -60,13 +76,15 @@ class DDV () :
         self.ddv = np.zeros(self.mdp.R.shape)
 
         while True :
-            self.updateQConfidenceIntervals()
+            self.updateQConfidenceIntervals(delta_)
 
             VUpper = np.max(self.QUpper[self.mdp.s0])
             VLower = np.max(self.QLower[self.mdp.s0])
 
             if VUpper - VLower <= self.epsilon :
                 break
+
+            self.updateStationaryDistribution()
 
             for s in range(self.mdp.S) :
                 if exploredStates[s] :
@@ -76,11 +94,83 @@ class DDV () :
             s_, self.R[s,a] = self.mdp.step(s, a)
 
             exploredStates[s_] = True
-            self.N[s, a, s_] += 1
+
+            self.updateVisitCountAndPHat(s, a, s_)
 
     def computeDDV(self, s, a) :
-        # TODO
-        pass
+        """
+        The OOU heuristic is used to calculate
+        an approximation of DDV. This is done
+        by multiplying the stationary distribution
+        of states under the current most optimistic
+        policy and the change in the confidence interval
+        of Q value for (s, a)
+
+        Parameters
+        ----------
+        s : int
+            State.
+        a : int
+            Action.
+        """
+        dQ = self.QUpper[s, a] - self.QLower[s, a]
+        if self.Ntotal[s, a] == 0 : 
+            dQ_ = self.mdp.gamma * self.mdp.Vmax
+            ddQ = np.abs(dQ - dQ_)
+            return self.mu(s) * ddQ
+        else :
+            Pu = np.copy(self.PHat)
+            Pl = np.copy(self.PHat)
+
+            self.tryExploring(s, a)
+
+            # TODO Not sure which delta this is?
+            Pu[s, a] = self.shiftProbabilityMass(s, a, delta, True)
+            Pl[s, a] = self.shiftProbabilityMass(s, a, delta, False)
+
+            self.undoExploring(s, a)
+
+            QUpper_ = QSolver(self.mdp, Pu, self.QUpper, self.stop)
+            QLower_ = QSolver(self.mdp, Pu, self.QLower, self.stop)
+
+            dQ_ = QUpper_[s, a] - QLower_[s, a]
+            ddQ = np.abs(dQ - dQ_)
+            return self.mu(s) * ddQ
+
+    def tryExploring (self, s, a) :
+        """
+        Increase the visits to (s, a).
+
+        We don't actually sample (s, a) because
+        we would just like to know how the 
+        Q(s, a) confidence interval will change.
+
+        A call to this function must be followed
+        by a call to undoExploring.
+
+        Parameters
+        ----------
+        s : int
+            State.
+        a : int
+            Action.
+        """
+        self.Ntotal[s, a] += 1
+
+    def undoExploring (self, s, a) :
+        """
+        Undo the visits to (s, a)
+
+        Follows the call to tryExploring.
+
+        Parameters
+        ----------
+        s : int
+            State.
+        a : int
+            Action.
+        """
+        self.Ntotal[s, a] -= 1
 
     def numberOfSamples (self) :
         """
@@ -131,20 +221,17 @@ class DDV () :
             True if we have to find the upper
             bound, else False.
         """
-        saCount = np.sum(self.N[s, a])
-
-        PHat = self.N / saCount
-        Pt = PHat
+        Pt = self.PHat
         
         if findUpper : 
             V = np.max(self.QUpper, axis=1)
         else : 
             V = np.max(self.QLower, axis=1)
 
-        deltaOmega = confidenceRadius(saCount, delta) / 2
+        deltaOmega = self.confidenceRadius(s, a, delta) / 2
 
         while deltaOmega > 0 : 
-            S_ = PHat[s, a] < 1
+            S_ = self.PHat[s, a] < 1
 
             donor = np.argmin(V[Pt[s, a] > 0])
             recipient = np.argmax(V[Pt[s, a] < 1 and S_])
@@ -161,14 +248,15 @@ class DDV () :
 
         return Pt[s, a]
 
-    def upperPGoodTuring (self, s, a, delta, M0) :
+    def shiftProbabilityMassGT (self, s, a, delta, M0, findUpper) :
         """
         The purpose of this function is the
-        same as that of upperP. 
+        same as that of shiftProbabilityMass.
 
-        There are some extensions to upperP
+        There are some extensions which 
+        are called Good-Turing Extensions
         which were proposed by the authors
-        which are implemented here.
+        and are implemented here.
 
         Parameters
         ----------
@@ -184,43 +272,49 @@ class DDV () :
         M0 : float
             Missing Mass Limit. Don't 
             know what this actually means.
+        findUpper : bool
+            Whether to find P to upper bound
+            Q or lower bound it.
         """
-        saCount = np.sum(self.N[s, a])
-        PHat = self.N / saCount
-        PTilda = PHat
+        Pt = self.PHat
+        
+        if findUpper : 
+            V = np.max(self.QUpper, axis=1)
+        else : 
+            V = np.max(self.QLower, axis=1)
 
-        constant1 = confidenceRadius(saCount, delta / 2) / 2
-        # I have no clue what this 
-        # second constant is for. 
-        # TODO : Find out what this is and 
-        # wrap this up in a function.
+        constant1 = self.confidenceRadius(s, a, delta / 2) / 2
+        # TODO : Find out what this is and wrap this up in a function.
         constant2 = (1 + 2**0.5) * (np.log(2 / delta) / saCount)**0.5
         deltaOmega = min(constant1, constant2)
 
         unvisitedSucc = self.N[s, a] == 0
 
         while deltaOmega > 0 : 
-            S_ = PHat[s, a] < 1
+            S_ = self.PHat[s, a] < 1
 
             if M0 == 0 :
                 S_[unvisitedSucc] = False
 
-            sLower = np.argmin(self.VUpper[PThilda[s, a] > 0])
-            sUpper = np.argmax(self.VUpper[PThilda[s, a] < 1 and S_])
+            donor = np.argmin(V[Pt[s, a] > 0])
+            recipient = np.argmax(V[Pt[s, a] < 1 and S_])
 
-            zeta = min(1 - PTilda[s, a, sUpper], PTilda[s, a, sLower], deltaOmega)
+            zeta = min(1 - Pt[s, a, donor], Pt[s, a, recipient], deltaOmega)
 
-            PTilda[s, a, sLower] -= zeta
-            PTilda[s, a, sUpper] += zeta
+            if not findUpper :
+                donor, recipient = recipient, donor
+
+            Pt[s, a, donor] -= zeta
+            Pt[s, a, recipient] += zeta 
 
             deltaOmega -= zeta
-            
+
             if unvisitedSucc[sUpper] :
                 M0 -= zeta
 
-        return PTilda
+        return Pt[s, a]
 
-    def confidenceRadius (self, saCount, delta) :
+    def confidenceRadius (self, s, a, delta) :
         """
         Referred to as omega in the DDV paper.
         Some magic function probably used to
@@ -228,14 +322,46 @@ class DDV () :
 
         Parameters
         ----------
-        saCount : int
-            How many times the (state, action) has 
-            been sampled by the algorithm.
+        s : int
+            State.
+        a : int
+            Action.
         delta : float
             A confidence interval parameter.
         """
-        top = np.log(2 ** (self.mdp.S) - 2) - np.log(delta))
-        return np.sqrt(2 * top / saCount)
+        top = np.log(2 ** self.mdp.S - 2) - np.log(delta)
+        return np.sqrt(2 * top / self.Ntotal[s, a])
+
+    def updateStationaryDistribution (self) :
+        """
+        After each change to our estimate
+        of upper bound on Q-function and 
+        the transition probabilities, we need
+        to recompute what will be the new 
+        stationary distribution of states
+        under the most optimistic policy.
+        """
+        policy = np.argmax(self.QUpper, axis=1)
+        self.mu = occupancySolver(self.mdp, policy, self.PHat, self.stop)
+        
+    def updateVisitCountAndPHat(self, s, a, s_) :
+        """
+        Update how many times we have taken
+        action a from state s, how many
+        times we have reached s_ by doing so
+        and what is the new estimate of transition
+        probabilities as a result.
+        
+        Parameters
+        ----------
+        s : int
+            State.
+        a : int
+            Action.
+        """
+        self.N[s, a, s_] += 1
+        self.Ntotal[s, a] += 1
+        self.PHat[s, a] = self.N[s, a] / self.Ntotal[s, a]
 
     def updateQConfidenceIntervals(self, delta) :
         """
@@ -262,12 +388,10 @@ class DDV () :
         Pu = np.zeros(self.mdp.T.shape)
         Pl = np.zeros(self.mdp.T.shape)
 
-        stop = lambda i, err : i < 100 or err < 0.1
-
         for s, a in product(range(S), range(A)) :
             Pu[s, a] = self.shiftProbabilityMass(s, a, delta, True)
             Pl[s, a] = self.shiftProbabilityMass(s, a, delta, False)
 
-        self.QUpper = QSolver(self.mdp, Pu, self.QUpper, stop)
-        self.QLower = QSolver(self.mdp, Pl, self.QLower, stop) 
+        self.QUpper = QSolver(self.mdp, Pu, self.QUpper, self.stop)
+        self.QLower = QSolver(self.mdp, Pl, self.QLower, self.stop) 
 
