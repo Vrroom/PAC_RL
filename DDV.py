@@ -63,11 +63,14 @@ class DDV () :
         # to solve the bellman equations
         # iteratively. This is the stopping
         # predicate.
-        self.stop = lambda i, err : i > 100 or err < 0.01
-        self.argmax = lambda a : stochasticArgmax(self.rng, self.epsilon * 1e-2, a)
-        self.argmin = lambda a : stochasticArgmin(self.rng, self.epsilon * 1e-2, a)
+        self.stop = lambda i, err : i > 1000 or err < 1e-5
+        self.argmax = lambda a : argmax(self.rng, a.flatten())
+        self.argmin = lambda a : argmin(self.rng, a.flatten())
 
         self.uniformSample()
+        self.uniformSample()
+        self.uniformSample()
+
         self.ddvLoop()
 
     def uniformSample (self) :
@@ -89,7 +92,9 @@ class DDV () :
         the OOU Heuristic to compute the 
         occupancy measure.
         """
-        m = self.numberOfSamples()
+        import pdb
+        pdb.set_trace()
+        m = 0.00001 * self.numberOfSamples()
         delta_ = self.delta / (self.mdp.S * self.mdp.A * m)
         
         exploredStates = np.zeros(self.mdp.S, dtype=bool)
@@ -103,6 +108,7 @@ class DDV () :
             VUpper = np.max(self.QUpper[self.mdp.s0])
             VLower = np.max(self.QLower[self.mdp.s0])
 
+            print(VUpper, VLower)
             if VUpper - VLower <= self.epsilon :
                 break
 
@@ -112,7 +118,6 @@ class DDV () :
                 if exploredStates[s] :
                     self.ddv[s] = np.array([self.computeDDV(s, a, delta_) for a in range(self.mdp.A)])
             
-            print(self.ddv)
             s, a = np.unravel_index(self.argmax(self.ddv), self.ddv.shape)
             s_, self.R[s,a] = self.mdp.step(s, a)
 
@@ -156,7 +161,7 @@ class DDV () :
             self.undoExploring(s, a)
 
             QUpper_ = QSolver(self.mdp, Pu, self.QUpper, self.stop)
-            QLower_ = QSolver(self.mdp, Pu, self.QLower, self.stop)
+            QLower_ = QSolver(self.mdp, Pl, self.QLower, self.stop)
 
             dQ_ = QUpper_[s, a] - QLower_[s, a]
             ddQ = np.abs(dQ - dQ_)
@@ -246,7 +251,7 @@ class DDV () :
             True if we have to find the upper
             bound, else False.
         """
-        Pt = self.PHat
+        Pt = np.copy(self.PHat)
         
         if findUpper : 
             V = np.max(self.QUpper, axis=1)
@@ -258,16 +263,17 @@ class DDV () :
         while abs(deltaOmega) > 1e-3 : 
             S_ = self.PHat[s, a] < 1
 
-            donor = self.argmin(V[Pt[s, a] > 0])
-            recipient = self.argmax(V[Pt[s, a] < 1 * S_])
+            if findUpper : 
+                donor = self.argmin(V[Pt[s, a] > 0])
+                recipient = self.argmax(V[Pt[s, a] < 1 * S_])
+            else :
+                donor = self.argmax(V[Pt[s, a] > 0])
+                recipient = self.argmin(V[Pt[s, a] < 1 * S_])
 
             zeta = min(1 - Pt[s, a, recipient], Pt[s, a, donor], deltaOmega)
             
             if abs(zeta) < 1e-3:
                 break
-
-            if not findUpper :
-                donor, recipient = recipient, donor
 
             Pt[s, a, donor] -= zeta
             Pt[s, a, recipient] += zeta 
@@ -304,7 +310,7 @@ class DDV () :
             Whether to find P to upper bound
             Q or lower bound it.
         """
-        Pt = self.PHat
+        Pt = np.copy(self.PHat)
         
         if findUpper : 
             V = np.max(self.QUpper, axis=1)
@@ -327,13 +333,13 @@ class DDV () :
             donor = self.argmin(V[Pt[s, a] > 0])
             recipient = self.argmax(V[Pt[s, a] < 1 * S_])
 
+            if not findUpper :
+                donor, recipient = recipient, donor
+
             zeta = min(1 - Pt[s, a, recipient], Pt[s, a, donor], deltaOmega)
             
             if abs(zeta) < 1e-3 :
                 break
-
-            if not findUpper :
-                donor, recipient = recipient, donor
 
             Pt[s, a, donor] -= zeta
             Pt[s, a, recipient] += zeta 

@@ -1,44 +1,38 @@
 import numpy as np
 
-def stochasticArgmax(rng, sigma, a, axis=None) : 
+def argmax(rng, a) : 
     """
     If there is a tie between multiple
-    entries, we want to reduce the probability 
-    that the same entry is always chosen.
+    entries, we want to ensure that
+    different entries are chosen.
 
     Parameters
     ----------
-    sigma : float
-        Noise variance. Ideally should be 
-        smaller than the errors we are willing
-        to tolerate.
+    rng : np.random.RandomState
+        Random Number Generator
     a : np.ndarray
-        Array.
-    axis : int or sequence
-        Axis along which to compute argmax.
+        1D array.
     """
-    noise = sigma * rng.randn(*a.shape)
-    return np.argmax(a + noise, axis)
+    maxs = a == np.max(a)
+    nTrue = np.sum(maxs)
+    probs = maxs / nTrue
+    return rng.choice(range(a.size), p=probs)
 
-def stochasticArgmin(rng, sigma, a, axis=None) : 
+def argmin(rng, a) : 
     """
     If there is a tie between multiple
-    entries, we want to reduce the probability 
-    that the same entry is always chosen.
+    entries, we want to ensure that
+    different entries are chosen.
 
     Parameters
     ----------
     rng : np.RandomState
         Random Number Generator.
-    sigma : float
-        Noise variance. Ideally should be 
-        smaller than the errors we are willing
-        to tolerate.
     a : np.ndarray
-        Array.
-    axis : int or sequence
-        Axis along which to compute argmin.
+        1D Array.
     """
-    noise = sigma * rng.randn(*a.shape)
-    return np.argmin(a + noise, axis)
+    mins = a == np.min(a)
+    nTrue = np.sum(mins)
+    probs = mins / nTrue
+    return rng.choice(range(a.size), p=probs)
 

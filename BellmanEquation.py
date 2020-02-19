@@ -1,4 +1,6 @@
 import numpy as np
+from pulp import *
+from itertools import product
 import math
 from MDP import *
 
@@ -24,7 +26,7 @@ def QSolver (mdp, P, Qinit, stoppingCondition) :
     """
     iterCnt = 0
     error = math.inf
-    Q = Qinit
+    Q = np.copy(Qinit)
     while not stoppingCondition(iterCnt, error) :
         Qold = np.copy(Q)
         V = np.max(Q, axis=1)
@@ -65,12 +67,12 @@ def occupancySolver (mdp, policy, P, stoppingCondition) :
     Pstart = np.zeros(mdp.S)
     Pstart[mdp.s0] = 1
 
-    P = P[np.arange(mdp.S), policy, :]
+    P_ = np.copy(P)
+    P_ = P_[np.arange(mdp.S), policy, :]
 
     while not stoppingCondition(iterCnt, error) :
         muOld = np.copy(mu)
-        mu = Pstart + mdp.gamma * np.sum(P * mu, axis=1)
+        mu = Pstart + mdp.gamma * np.sum(P_ * mu, axis=1)
         iterCnt += 1
         error = np.linalg.norm(mu - muOld)
     return mu
-
