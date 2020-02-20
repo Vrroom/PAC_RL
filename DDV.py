@@ -48,6 +48,7 @@ class DDV () :
 
         self.QUpper = np.ones(mdp.R.shape) * mdp.Vmax
         self.QLower = np.zeros(mdp.R.shape)
+        print(self.QLower)
 
         self.mu = np.zeros(mdp.S)
 
@@ -92,9 +93,7 @@ class DDV () :
         the OOU Heuristic to compute the 
         occupancy measure.
         """
-        import pdb
-        pdb.set_trace()
-        m = 0.00001 * self.numberOfSamples()
+        m = self.numberOfSamples()
         delta_ = self.delta / (self.mdp.S * self.mdp.A * m)
         
         exploredStates = np.zeros(self.mdp.S, dtype=bool)
@@ -120,6 +119,8 @@ class DDV () :
             
             s, a = np.unravel_index(self.argmax(self.ddv), self.ddv.shape)
             s_, self.R[s,a] = self.mdp.step(s, a)
+
+            print(s, a, s_)
 
             exploredStates[s_] = True
 
@@ -154,7 +155,8 @@ class DDV () :
 
             self.tryExploring(s, a)
 
-            # TODO Not sure which delta this is?
+            import pdb
+            pdb.set_trace()
             Pu[s, a] = self.shiftProbabilityMass(s, a, delta, True)
             Pl[s, a] = self.shiftProbabilityMass(s, a, delta, False)
 
@@ -216,6 +218,7 @@ class DDV () :
         term2 = np.log((S * A) / (self.epsilon * (1 - gamma) ** self.delta))
         return (S + term2) * factor
 
+
     def shiftProbabilityMass (self, s, a, delta, findUpper) :
         """
         The algorithm searches for extremal bounds
@@ -251,6 +254,22 @@ class DDV () :
             True if we have to find the upper
             bound, else False.
         """
+
+        def findDonorRecipient () :
+            V1 = np.copy(V)
+            V2 = np.copy(V)
+            if findUpper : 
+                V1[~(Pt[s, a] > 0)] = math.inf
+                V2[~(Pt[s, a] < 1 * S_)] = -math.inf
+                donor = self.argmin(V1)
+                recipient = self.argmax(V2)
+            else :
+                V1[~(Pt[s, a] > 0)] = -math.inf
+                V2[~(Pt[s, a] < 1 * S_)] = math.inf
+                donor = self.argmax(V1)
+                recipient = self.argmin(V2)
+            return donor, recipient
+
         Pt = np.copy(self.PHat)
         
         if findUpper : 
@@ -262,16 +281,8 @@ class DDV () :
 
         while abs(deltaOmega) > 1e-3 : 
             S_ = self.PHat[s, a] < 1
-
-            if findUpper : 
-                donor = self.argmin(V[Pt[s, a] > 0])
-                recipient = self.argmax(V[Pt[s, a] < 1 * S_])
-            else :
-                donor = self.argmax(V[Pt[s, a] > 0])
-                recipient = self.argmin(V[Pt[s, a] < 1 * S_])
-
+            donor, recipient = findDonorRecipient() 
             zeta = min(1 - Pt[s, a, recipient], Pt[s, a, donor], deltaOmega)
-            
             if abs(zeta) < 1e-3:
                 break
 
@@ -431,4 +442,9 @@ class DDV () :
 
         self.QUpper = QSolver(self.mdp, Pu, self.QUpper, self.stop)
         self.QLower = QSolver(self.mdp, Pl, self.QLower, self.stop) 
+        import pdb
+        pdb.set_trace()
+        print(self.QUpper)
+        print(QSolver(self.mdp, self.PHat, np.zeros(self.mdp.R.shape), self.stop))
+        print(self.QLower)
 

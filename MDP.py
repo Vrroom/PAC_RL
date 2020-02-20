@@ -63,11 +63,11 @@ class MDP () :
         self.Rmin = np.min(R)
 
         # Normalize rewards
-        self.R = (self.R - self.Rmin) / (self.Rmax - self.Rmin)
+        #self.R = (self.R - self.Rmin) / (self.Rmax - self.Rmin)
         
         # Calculate the maximum value
         # that can be achieved
-        self.Vmax = 1 / (1 - gamma)
+        self.Vmax = self.Rmax / (1 - gamma)
 
         # Random number generator
         self.rng = np.random.RandomState(seed)
