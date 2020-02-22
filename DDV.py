@@ -48,7 +48,6 @@ class DDV () :
 
         self.QUpper = np.ones(mdp.R.shape) * mdp.Vmax
         self.QLower = np.zeros(mdp.R.shape)
-        print(self.QLower)
 
         self.mu = np.zeros(mdp.S)
 
@@ -65,12 +64,9 @@ class DDV () :
         # iteratively. This is the stopping
         # predicate.
         self.stop = lambda i, err : i > 1000 or err < 1e-5
-        self.argmax = lambda a : argmax(self.rng, a.flatten())
-        self.argmin = lambda a : argmin(self.rng, a.flatten())
 
-        self.uniformSample()
-        self.uniformSample()
-        self.uniformSample()
+        for _ in range(100) :
+            self.uniformSample()
 
         self.ddvLoop()
 
@@ -101,13 +97,14 @@ class DDV () :
 
         self.ddv = np.zeros(self.mdp.R.shape)
 
-        while True :
+        iterCnt = 0
+        while True and iterCnt < 1000:
             self.updateQConfidenceIntervals(delta_)
 
             VUpper = np.max(self.QUpper[self.mdp.s0])
             VLower = np.max(self.QLower[self.mdp.s0])
 
-            print(VUpper, VLower)
+            print(VUpper - VLower)
             if VUpper - VLower <= self.epsilon :
                 break
 
@@ -117,7 +114,7 @@ class DDV () :
                 if exploredStates[s] :
                     self.ddv[s] = np.array([self.computeDDV(s, a, delta_) for a in range(self.mdp.A)])
             
-            s, a = np.unravel_index(self.argmax(self.ddv), self.ddv.shape)
+            s, a = np.unravel_index(argmax(self.ddv.flatten()), self.ddv.shape)
             s_, self.R[s,a] = self.mdp.step(s, a)
 
             print(s, a, s_)
@@ -125,6 +122,8 @@ class DDV () :
             exploredStates[s_] = True
 
             self.updateVisitCountAndPHat(s, a, s_)
+
+            iterCnt += 1
 
     def computeDDV(self, s, a, delta) :
         """
@@ -155,15 +154,10 @@ class DDV () :
 
             self.tryExploring(s, a)
 
-            import pdb
-            pdb.set_trace()
-            Pu[s, a] = self.shiftProbabilityMass(s, a, delta, True)
-            Pl[s, a] = self.shiftProbabilityMass(s, a, delta, False)
+            QUpper_ = QBoundsSolver(self.mdp, self.PHat, self.QUpper, self.Ntotal, delta, True, self.stop)
+            QLower_ = QBoundsSolver(self.mdp, self.PHat, self.QLower, self.Ntotal, delta, False, self.stop)
 
             self.undoExploring(s, a)
-
-            QUpper_ = QSolver(self.mdp, Pu, self.QUpper, self.stop)
-            QLower_ = QSolver(self.mdp, Pl, self.QLower, self.stop)
 
             dQ_ = QUpper_[s, a] - QLower_[s, a]
             ddQ = np.abs(dQ - dQ_)
@@ -218,168 +212,6 @@ class DDV () :
         term2 = np.log((S * A) / (self.epsilon * (1 - gamma) ** self.delta))
         return (S + term2) * factor
 
-
-    def shiftProbabilityMass (self, s, a, delta, findUpper) :
-        """
-        The algorithm searches for extremal bounds
-        for the Q-function. It searches for these 
-        extremal bounds within a particular 
-        confidence interval of the transition
-        probability estimates. 
-
-        findUpper specifies how to shift the
-        probability mass. When you want to find 
-        an upper bound on the Q-function, you shift
-        mass from less valuable states to more 
-        valuable states. For the lower bound, you
-        do the opposite.
-
-        This algorithm by Strehl and Littman returns
-        the transition probabilities. Plugging them
-        in the Bellman Equation gives the extremal
-        bound on the Q function.
-
-        Parameters
-        ----------
-        s : int
-            The state for which we are finding
-            the transition probabilities that 
-            maximise the Q function.
-        a : int
-            The action for which we are finding 
-            the transition probabilities.
-        delta : float
-            Confidence Parameter.
-        findUpper : bool 
-            True if we have to find the upper
-            bound, else False.
-        """
-
-        def findDonorRecipient () :
-            V1 = np.copy(V)
-            V2 = np.copy(V)
-            if findUpper : 
-                V1[~(Pt[s, a] > 0)] = math.inf
-                V2[~(Pt[s, a] < 1 * S_)] = -math.inf
-                donor = self.argmin(V1)
-                recipient = self.argmax(V2)
-            else :
-                V1[~(Pt[s, a] > 0)] = -math.inf
-                V2[~(Pt[s, a] < 1 * S_)] = math.inf
-                donor = self.argmax(V1)
-                recipient = self.argmin(V2)
-            return donor, recipient
-
-        Pt = np.copy(self.PHat)
-        
-        if findUpper : 
-            V = np.max(self.QUpper, axis=1)
-        else : 
-            V = np.max(self.QLower, axis=1)
-
-        deltaOmega = self.confidenceRadius(s, a, delta) / 2
-
-        while abs(deltaOmega) > 1e-3 : 
-            S_ = self.PHat[s, a] < 1
-            donor, recipient = findDonorRecipient() 
-            zeta = min(1 - Pt[s, a, recipient], Pt[s, a, donor], deltaOmega)
-            if abs(zeta) < 1e-3:
-                break
-
-            Pt[s, a, donor] -= zeta
-            Pt[s, a, recipient] += zeta 
-
-            deltaOmega -= zeta
-
-        return Pt[s, a]
-
-    def shiftProbabilityMassGT (self, s, a, delta, M0, findUpper) :
-        """
-        The purpose of this function is the
-        same as that of shiftProbabilityMass.
-
-        There are some extensions which 
-        are called Good-Turing Extensions
-        which were proposed by the authors
-        and are implemented here.
-
-        Parameters
-        ----------
-        s : int
-            The state for which we are finding
-            the transition probabilities that 
-            maximise the Q function.
-        a : int
-            The action for which we are finding 
-            the transition probabilities.
-        delta : float
-            Confidence Parameter.
-        M0 : float
-            Missing Mass Limit. Don't 
-            know what this actually means.
-        findUpper : bool
-            Whether to find P to upper bound
-            Q or lower bound it.
-        """
-        Pt = np.copy(self.PHat)
-        
-        if findUpper : 
-            V = np.max(self.QUpper, axis=1)
-        else : 
-            V = np.max(self.QLower, axis=1)
-
-        constant1 = self.confidenceRadius(s, a, delta / 2) / 2
-        # TODO : Find out what this is and wrap this up in a function.
-        constant2 = (1 + 2**0.5) * (np.log(2 / delta) / saCount)**0.5
-        deltaOmega = min(constant1, constant2)
-
-        unvisitedSucc = self.N[s, a] == 0
-
-        while abs(deltaOmega) > 1e-3 : 
-            S_ = self.PHat[s, a] < 1
-
-            if M0 == 0 :
-                S_[unvisitedSucc] = False
-
-            donor = self.argmin(V[Pt[s, a] > 0])
-            recipient = self.argmax(V[Pt[s, a] < 1 * S_])
-
-            if not findUpper :
-                donor, recipient = recipient, donor
-
-            zeta = min(1 - Pt[s, a, recipient], Pt[s, a, donor], deltaOmega)
-            
-            if abs(zeta) < 1e-3 :
-                break
-
-            Pt[s, a, donor] -= zeta
-            Pt[s, a, recipient] += zeta 
-
-            deltaOmega -= zeta
-
-            if unvisitedSucc[sUpper] :
-                M0 -= zeta
-
-        return Pt[s, a]
-
-    def confidenceRadius (self, s, a, delta) :
-        """
-        Referred to as omega in the DDV paper.
-        Some magic function probably used to
-        make the PAC guarantees go through.
-
-        Parameters
-        ----------
-        s : int
-            State.
-        a : int
-            Action.
-        delta : float
-            A confidence interval parameter.
-        """
-        top = np.log(2 ** self.mdp.S - 2) - np.log(delta)
-        return np.sqrt(2 * top / self.Ntotal[s, a])
-
     def updateStationaryDistribution (self) :
         """
         After each change to our estimate
@@ -430,21 +262,5 @@ class DDV () :
             Confidence Parameter for shifting
             probability mass.
         """
-        S = self.mdp.S
-        A = self.mdp.A
-
-        Pu = np.zeros(self.mdp.T.shape)
-        Pl = np.zeros(self.mdp.T.shape)
-
-        for s, a in product(range(S), range(A)) :
-            Pu[s, a] = self.shiftProbabilityMass(s, a, delta, True)
-            Pl[s, a] = self.shiftProbabilityMass(s, a, delta, False)
-
-        self.QUpper = QSolver(self.mdp, Pu, self.QUpper, self.stop)
-        self.QLower = QSolver(self.mdp, Pl, self.QLower, self.stop) 
-        import pdb
-        pdb.set_trace()
-        print(self.QUpper)
-        print(QSolver(self.mdp, self.PHat, np.zeros(self.mdp.R.shape), self.stop))
-        print(self.QLower)
-
+        self.QUpper = QBoundsSolver(self.mdp, self.PHat, self.QUpper, self.Ntotal, delta, True, self.stop)
+        self.QLower = QBoundsSolver(self.mdp, self.PHat, self.QLower, self.Ntotal, delta, False, self.stop)
