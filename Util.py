@@ -55,3 +55,16 @@ def argmin(a) :
     probs = mins / nTrue
     return RNG.choice(range(a.size), p=probs)
 
+def log (thing, types) :
+    """
+    Logs all member variables 
+    of a certain type from the object.
+    """
+    members = dir(thing)
+    print("-----------")
+    for m in members : 
+        attr = getattr(thing, m) 
+        if any([isinstance(attr, t) for t in types]) : 
+            print(m)
+            print(attr)
+    print("-----------")
