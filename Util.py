@@ -1,6 +1,20 @@
 import numpy as np
+import mdptoolbox.example
+from itertools import chain, combinations
 
-RNG = np.random.RandomState(0)
+RNG = np.random.RandomState(20)
+
+def powerset(iterable):
+    """
+    Stolen from :
+
+    https://docs.python.org/3/library/itertools.html
+
+    Helps in enumerating all two action
+    possible policies.
+    """
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
 def confidenceRadius (mdp, visitCount, delta) :
     """
@@ -21,7 +35,6 @@ def confidenceRadius (mdp, visitCount, delta) :
     """
     top = np.log(2 ** mdp.S - 2) - np.log(delta)
     return np.sqrt(2 * top / visitCount)
-
 
 def argmax(a) : 
     """
@@ -68,3 +81,4 @@ def log (thing, types) :
             print(m)
             print(attr)
     print("-----------")
+

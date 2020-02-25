@@ -1,5 +1,21 @@
 import numpy as np 
 import json
+import mdptoolbox.example
+
+def randomMDP(S, A) :
+    """
+    Generate a random MDP
+    using mdptoolbox for testing
+    purposes.
+    """
+    T, R = mdptoolbox.example.rand(S, A)
+    T = np.swapaxes(T, 0, 1)
+    R = np.swapaxes(R, 0, 1)
+    R = np.sum(R, axis=2)
+    s0 = 0
+    gamma = 0.9
+    seed = 20
+    return MDP(s0, S, A, T, gamma, R, seed)
 
 def MDPfromJson (filename) :
     """
@@ -20,7 +36,7 @@ def MDPfromJson (filename) :
     T = np.array(dct['T'])
     gamma = float(dct['gamma'])
     R = np.array(dct['R'])
-    return MDP(s0, S, A, T, gamma, R, 0)
+    return MDP(s0, S, A, T, gamma, R, 20)
 
 class MDP () :
 
@@ -67,6 +83,7 @@ class MDP () :
         
         # Calculate the maximum value
         # that can be achieved
+        # self.Vmax = self.Rmax / (1 - gamma)
         self.Vmax = 1 / (1 - gamma)
 
         # Random number generator

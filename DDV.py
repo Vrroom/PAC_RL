@@ -53,6 +53,9 @@ class DDV () :
         self.QUpper = np.ones(mdp.R.shape) * mdp.Vmax
         self.QLower = np.zeros(mdp.R.shape)
 
+        self.qu = np.ones(mdp.R.shape) * mdp.Vmax
+        self.ql = np.zeros(mdp.R.shape)
+
         self.mu = np.zeros(mdp.S)
 
         # Since rewards are deterministic
@@ -69,7 +72,10 @@ class DDV () :
         # predicate.
         self.stop = lambda i, err : err < 1e-9
 
-        for _ in range(10) :
+        self.Qstar = QSolver(self.mdp, self.mdp.T, np.zeros(self.mdp.R.shape), self.stop)
+        self.Vstar = np.max(self.Qstar, axis=1)
+
+        for _ in range(10):
             self.uniformSample()
 
         self.ddvLoop()
@@ -122,10 +128,13 @@ class DDV () :
 
             self.updateVisitStatistics(s, a, s_)
 
-            self.iterCnt += 1
             if self.iterCnt % 100 == 0: 
-                print(self.Vu - self.Vl)
-                # log(self, [np.ndarray, float, int])
+                #log(self, [np.ndarray, int, float])
+                print(self.iterCnt, (self.Vu - self.Vl) / self.Vstar[self.mdp.s0])
+                qq = QSolver(self.mdp, self.PHat, np.zeros(self.QUpper.shape), self.stop)
+                print(np.argmax(qq, axis=1))
+
+            self.iterCnt += 1
 
     def computeDDV(self, s, a) :
         """
@@ -250,6 +259,7 @@ class DDV () :
         current estimates of transition probability
         and current total visits.
         """
+        self.delta_ = 0.1
         u = QBoundsSolver(self.mdp, self.PHat, self.QUpper, 
                 self.Ntotal, self.delta_, True, self.stop)
         l = QBoundsSolver(self.mdp, self.PHat, self.QLower, 

@@ -173,14 +173,127 @@ def QBoundsSolver (mdp, PHat, Qinit, N, delta, sense, stop) :
     iterCnt = 0
     error = math.inf
     Q = np.copy(Qinit)
+
     while not stop(iterCnt, error) :
         Qold = np.copy(Q)
+
         Pt = np.zeros(PHat.shape)
         for s, a in product(range(mdp.S), range(mdp.A)) :
-            omega = confidenceRadius(mdp, N[s, a], delta)
+            omega = confidenceRadius(mdp, N[s, a], delta) / 2
             Pt[s, a] = shiftP(Q, s, a, omega)
+
         Q = QSolver(mdp, Pt, Q, stop)
+
+        iterCnt += 1
         error = np.linalg.norm(Q - Qold)
     return Q
 
+def QPiBoundsSolver (mdp, PHat, Qinit, N, delta, sense, stop, pi) :
+    """
+    Solve the Bellman Equations (7) and (8) 
+    from the DDV paper:
 
+    PAC Optimal MDP Planning with Application to 
+    Invasive Species Management. (Taleghan et al. - 2013)
+
+    Parameters
+    ----------
+    mdp : MDP
+        Underlying MDP.
+    PHat : np.ndarray
+        Estimate of the MDP's 
+        transition probabilities.
+    Qinit : np.ndarray
+        Initial guess of action-
+        value function.
+    N : np.ndarray
+        State-Action visit count.    
+    delta : float
+        Confidence Interval Parameter
+    sense : bool
+        If true, then we solve
+        to find the upper bound.
+        Else the lower bound.
+    stop : lambda
+        The stopping condition.
+    """
+    
+    def shiftP (Q, s, a, omega) :
+        """
+        Helper function used to do value
+        iteration with confidence intervals.
+
+        This function gives the probability 
+        distribution in the confidence interval
+        of the transition probability function
+        that will maximize/minimize the outer 
+        max/min in the Bellman Equation.
+
+        Based on the procedure described in :
+
+        An Analysis of model-based Interval Estimation
+        for Markov Decision Processes. (Strehl, Littman - 2008)
+        
+        Parameters
+        ----------
+        Q : np.ndarray
+            Action-Value function
+        s : int
+            State.
+        a : int 
+            Action.
+        omega : float
+            Confidence Interval width.
+        """
+        V = Q[np.arange(mdp.S), pi]
+        Pt = np.copy(PHat[s, a])
+
+        addSelect = argmax if sense else argmin
+        subSelect = argmin if sense else argmax
+        
+        val1 = -math.inf if sense else math.inf
+        val2 = math.inf if sense else -math.inf
+
+        # First add amount omega
+        # to all the promising states.
+        addAmount = omega
+        while addAmount > 1e-5 : 
+            V1 = np.copy(V)
+            mask = Pt < 1
+            V1[~mask] = val1
+            s = addSelect(V1)
+            zeta = min(1 - Pt[s], addAmount)
+            Pt[s] += zeta
+            addAmount -= zeta
+
+        # Then subtract that value
+        # from the less promising states.
+        subAmount = omega
+        while subAmount > 1e-5 :
+            V1 = np.copy(V)
+            mask = Pt > 0
+            V1[~mask] = val2
+            s = subSelect(V1)
+            zeta = min(Pt[s], subAmount)
+            Pt[s] -= zeta
+            subAmount -= zeta
+
+        return Pt / np.sum(Pt)
+
+    iterCnt = 0
+    error = math.inf
+    Q = np.copy(Qinit)
+
+    while not stop(iterCnt, error) :
+        Qold = np.copy(Q)
+
+        Pt = np.zeros(PHat.shape)
+        for s, a in product(range(mdp.S), range(mdp.A)) :
+            omega = confidenceRadius(mdp, N[s, a], delta) / 2
+            Pt[s, a] = shiftP(Q, s, a, omega)
+
+        Q = QSolver(mdp, Pt, Q, stop)
+
+        iterCnt += 1
+        error = np.linalg.norm(Q - Qold)
+    return Q
